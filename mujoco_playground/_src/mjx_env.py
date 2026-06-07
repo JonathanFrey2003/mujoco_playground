@@ -141,8 +141,9 @@ def make_data(
     device: Optional[jax.Device] = None,
 ) -> mjx.Data:
   """Initialize MJX Data."""
+  print("DEBUG naccdmax:", naccdmax)
   data = mjx.make_data(
-      model, impl=impl, naconmax=naconmax, naccdmax=naccdmax, njmax=njmax,
+      model, impl=impl, naconmax=naconmax, naccdmax =100000, njmax=njmax,
       device=device,
   )
   if qpos is not None:
