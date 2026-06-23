@@ -135,7 +135,7 @@ def make_ppo_networks(
           mean_kernel_init_fn(**mean_kernel_init_kwargs_)
           if mean_kernel_init_fn is not None else None
       ),
-      policy_type='gnn',
+      policy_type='abd',
       edges=edges,
   )
   value_network = networks.make_value_network(
