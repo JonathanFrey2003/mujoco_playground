@@ -133,10 +133,10 @@ class ABDNet(nn.Module):
         ]
 
         # action decoders
-        self.action_decoders = [
-            nn.Dense(1)
-            for _ in range(16)
-        ]
+        #self.action_decoders = [
+        #    nn.Dense(1)
+       #     for _ in range(16)
+       # ]
 
         # ABD parameters
         self.B = self.param(
@@ -161,7 +161,7 @@ class ABDNet(nn.Module):
             for size in self.layer_sizes
         ]
 
-        self.parents = jnp.array([
+        self.parents = [
             -1,  # palm
 
             0, 1, 2, 3,     # index
@@ -169,7 +169,7 @@ class ABDNet(nn.Module):
             0, 9,10,11,     # ring
 
             0,13,14,15      # thumb
-        ])
+        ]
 
         self.traversal_order = self.make_leaf_to_root_order(
             self.parents
@@ -265,23 +265,41 @@ class ABDNet(nn.Module):
                     .add(va)
                 )
 
-        actions = []
+    #    actions = []
 
         for joint_idx in range(16):
 
             parent_link = joint_idx
 
-            a = self.action_decoders[joint_idx](
-                states[..., parent_link, :]
-            )
+            #a = self.action_decoders[joint_idx](
+           #     states[..., parent_link, :]
+           # )
 
-            actions.append(a)
+           # actions.append(a)
 
-        x = jnp.concatenate(
-            actions,
-            axis=-1
+        #x = jnp.concatenate(
+      #      actions,
+      #      axis=-1
+      #  )
+
+        x = jnp.reshape(
+            states,
+            batch_shape + (-1,),
         )
 
+        for idx, layer in enumerate(
+            self.output_layers
+        ):
+
+            x = layer(x)
+
+            if idx < len(self.output_layers) - 1:
+
+                x = self.activation(x)
+
+                if self.layer_norm:
+                    x = nn.LayerNorm()(x)
+        print("ABD output shape= ", x.shape)
         return x
 
 
@@ -812,6 +830,7 @@ def make_policy_network(
     num_nodes: int = 16
 ) -> FeedForwardNetwork:
   """Creates a policy network."""
+  print("par size:", param_size)
   if distribution_type == 'tanh_normal':
     if policy_type == 'gnn':
       policy_module = GNN(
@@ -825,6 +844,7 @@ def make_policy_network(
           node_feature_dim = 2
       )
     elif policy_type == 'abd':
+      print("ABd param_size= ", param_size)
       policy_module = ABDNet(
           layer_sizes=list(hidden_layer_sizes) + [param_size],
           hidden_dim=64,
@@ -866,7 +886,9 @@ def make_policy_network(
       )
     else:
       obs = preprocess_observations_fn(obs, processor_params)
-    return policy_module.apply(policy_params, obs)
+    out = policy_module.apply(policy_params, obs)
+    print("polixy out shape=",out.shape)
+    return out
 
   obs_size = _get_obs_state_size(obs_size, obs_key)
   dummy_obs = jnp.zeros((1, obs_size))
