@@ -118,6 +118,7 @@ def make_ppo_networks(
         f'Unsupported distribution type: {distribution_type}. Must be one'
         ' of "normal" or "tanh_normal".'
     )
+  print("param_size inside make_ppo_networks:", parametric_action_distribution.param_size)
   policy_network = networks.make_policy_network(
       parametric_action_distribution.param_size,
       observation_size,
