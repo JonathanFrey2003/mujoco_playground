@@ -37,7 +37,8 @@ class PPONetworkParams:
 
 def compute_orthogonality_loss(
     params: PPONetworkParams,
-    orthogonality_weight: float
+    orthogonality_weight: float,
+    states: jnp.ndarray
 ):
     orthogonality_loss = 0.0
 
@@ -47,14 +48,25 @@ def compute_orthogonality_loss(
         W = policy_params["W"]      # (17, hidden_dim, hidden_dim)
         I = jnp.eye(W.shape[-1])
 
-        WT_W = jnp.matmul(
-            jnp.swapaxes(W, -1, -2),
-            W,
-        )
+        K = W.shape[0]
+        for i in range(K):
 
-        orthogonality_loss = jnp.mean(
-            (WT_W - I) ** 2
-        )
+            Wi = W[i]
+
+            vi = states[..., i, :]
+
+            while vi.ndim > 1:
+                vi = jnp.mean(vi, axis=0)
+
+            D = jnp.diag(vi)
+
+            M = Wi.T @ D @ Wi
+
+            orthogonality_loss += jnp.sum(
+                (M - I) ** 2
+            )
+
+        orthogonality_loss /= K
     return orthogonality_loss * orthogonality_weight
 
 
@@ -179,7 +191,7 @@ def compute_ppo_loss(
     vf_coefficient: float = 0.5,
     clipping_epsilon_value: float | None = None,
     use_distributional_critic: bool = False,
-    orthogonality_weight: float = 1e-2,
+    orthogonality_weight: float = 1e-3,
 ) -> Tuple[jnp.ndarray, types.Metrics]:
   """Computes PPO loss.
 
@@ -211,8 +223,8 @@ def compute_ppo_loss(
 
   # Put the time dimension first.
   data = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), data)
-  policy_logits = policy_apply(
-      normalizer_params, params.policy, data.observation
+  policy_logits, states = policy_apply(
+      normalizer_params, params.policy, data.observation, return_intermediates=True
   )
 
   if use_distributional_critic:
@@ -296,7 +308,7 @@ def compute_ppo_loss(
   entropy = jnp.mean(parametric_action_distribution.entropy(policy_logits, rng))
   entropy_loss = entropy_cost * -entropy
 
-  orth_loss = compute_orthogonality_loss(params, orthogonality_weight)
+  orth_loss = compute_orthogonality_loss(params, orthogonality_weight, states)
 
   total_loss = policy_loss + v_loss + entropy_loss + orth_loss
 

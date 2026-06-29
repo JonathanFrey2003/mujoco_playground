@@ -126,9 +126,11 @@ class ABDNet(nn.Module):
     
     def setup(self):
 
-        self.link_encoders = MLP([64, self.hidden_dim], layer_norm=True)
+        self.link_encoders = [MLP([64, self.hidden_dim], layer_norm=True)
+                                for _ in range(self.num_nodes)]
 
-        self.action_decoders = MLP([64,2], layer_norm=True)
+        self.action_decoders = [MLP([64,2], layer_norm=True)
+                                for _ in range(self.num_nodes-1)]
 
         self.B = self.param(
             "B",
@@ -171,7 +173,7 @@ class ABDNet(nn.Module):
         z_list = []
 
         for i in range(self.num_nodes):
-            zi = self.link_encoders(
+            zi = self.link_encoders[i](
                 data
             )
             z_list.append(zi)
@@ -228,7 +230,7 @@ class ABDNet(nn.Module):
 
             parent_link = self.joint_parent_links[joint_idx]
 
-            a_i = self.action_decoders(
+            a_i = self.action_decoders[joint_idx](
                 states[..., parent_link, :]
             )
 
@@ -237,6 +239,12 @@ class ABDNet(nn.Module):
         x = jnp.concatenate(
             actions,
             axis=-1
+        )
+
+        self.sow(
+          "intermediates",
+          "states",
+          states,
         )
 
         return x
@@ -816,14 +824,20 @@ def make_policy_network(
         ' of "normal" or "tanh_normal".'
     )
 
-  def apply(processor_params, policy_params, obs):
+  def apply(processor_params, policy_params, obs, return_intermediates=False):
     if isinstance(obs, Mapping):
       obs = preprocess_observations_fn(
           obs[obs_key], normalizer_select(processor_params, obs_key)
       )
     else:
       obs = preprocess_observations_fn(obs, processor_params)
-    return policy_module.apply(policy_params, obs)
+      
+    if not return_intermediates:
+      return policy_module.apply(policy_params, obs)
+    
+    logits, variables = policy_module.apply(policy_params, obs, mutable=["intermediates"])
+    states = variables["intermediates"]["states"][0]
+    return logits, states
 
   obs_size = _get_obs_state_size(obs_size, obs_key)
   dummy_obs = jnp.zeros((1, obs_size))
