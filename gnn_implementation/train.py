@@ -853,6 +853,7 @@ def train(
             training_metrics,
         )
       logging.info(metrics)
+      print("current_step: ", current_step, "target: ", num_timesteps)
       progress_fn(current_step, metrics)
 
   total_steps = current_step

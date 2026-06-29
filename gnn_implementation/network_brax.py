@@ -123,22 +123,13 @@ class ABDNet(nn.Module):
         dfs(0)
 
         return order
-
+    
     def setup(self):
 
-        # link encoders
-        self.link_encoders = [
-            nn.Dense(self.hidden_dim)
-            for _ in range(self.num_nodes)
-        ]
+        self.link_encoders = MLP([64, self.hidden_dim], layer_norm=True)
 
-        # action decoders
-        #self.action_decoders = [
-        #    nn.Dense(1)
-       #     for _ in range(16)
-       # ]
+        self.action_decoders = MLP([64,2], layer_norm=True)
 
-        # ABD parameters
         self.B = self.param(
             "B",
             nn.initializers.zeros,
@@ -155,12 +146,6 @@ class ABDNet(nn.Module):
             ),
         )
 
-        # output MLP
-        self.output_layers = [
-            nn.Dense(size)
-            for size in self.layer_sizes
-        ]
-
         self.parents = [
             -1,  # palm
 
@@ -171,64 +156,37 @@ class ABDNet(nn.Module):
             0,13,14,15      # thumb
         ]
 
+        self.joint_parent_links = self.parents[1:]
+
         self.traversal_order = self.make_leaf_to_root_order(
             self.parents
         )
 
-        print(self.traversal_order)
-
-
     def __call__(self, data: jnp.ndarray):
 
-        batch_shape = data.shape[:-1]
-
         # --------------------------------------------------
-        # observation -> node embeddings z_i
+        # link embedding
         # --------------------------------------------------
-
-        joint_pos = data[..., :16]
-        joint_act = data[..., 16:32]
-
-        root = jnp.zeros(
-            batch_shape + (1,2)
-        )
-
-        joints = jnp.stack(
-            [joint_pos, joint_act],
-            axis=-1
-        )
-
-        z = jnp.concatenate(
-            [root, joints],
-            axis=-2
-        )
 
         z_list = []
 
         for i in range(self.num_nodes):
-
-            zi = self.link_encoders[i](
-                z[..., i, :]
+            zi = self.link_encoders(
+                data
             )
-
             z_list.append(zi)
 
         z = jnp.stack(z_list, axis=-2)
-
-        # --------------------------------------------------
-        # message buffer
-        # --------------------------------------------------
 
         messages = jnp.zeros_like(z)
         states = jnp.zeros_like(z)
 
         # --------------------------------------------------
-        # leaf -> root traversal
+        # message passing
         # --------------------------------------------------
 
         for i in self.traversal_order:
 
-            # Eq. (7)
             vi = (
                 nn.softplus(
                     z[..., i, :]
@@ -245,11 +203,6 @@ class ABDNet(nn.Module):
 
                 Wi = self.W[i]
 
-                # Eq. (8)
-                #
-                # proj = W W^T v
-                #
-
                 WWT = Wi @ Wi.T
 
                 proj = jnp.einsum(
@@ -265,41 +218,27 @@ class ABDNet(nn.Module):
                     .add(va)
                 )
 
-    #    actions = []
+        # --------------------------------------------------
+        # action decoding
+        # --------------------------------------------------
 
-        for joint_idx in range(16):
+        actions = []
 
-            parent_link = joint_idx
+        for joint_idx in range(self.num_nodes-1):
 
-            #a = self.action_decoders[joint_idx](
-           #     states[..., parent_link, :]
-           # )
+            parent_link = self.joint_parent_links[joint_idx]
 
-           # actions.append(a)
+            a_i = self.action_decoders(
+                states[..., parent_link, :]
+            )
 
-        #x = jnp.concatenate(
-      #      actions,
-      #      axis=-1
-      #  )
+            actions.append(a_i)
 
-        x = jnp.reshape(
-            states,
-            batch_shape + (-1,),
+        x = jnp.concatenate(
+            actions,
+            axis=-1
         )
 
-        for idx, layer in enumerate(
-            self.output_layers
-        ):
-
-            x = layer(x)
-
-            if idx < len(self.output_layers) - 1:
-
-                x = self.activation(x)
-
-                if self.layer_norm:
-                    x = nn.LayerNorm()(x)
-        print("ABD output shape= ", x.shape)
         return x
 
 
@@ -830,7 +769,6 @@ def make_policy_network(
     num_nodes: int = 16
 ) -> FeedForwardNetwork:
   """Creates a policy network."""
-  print("par size:", param_size)
   if distribution_type == 'tanh_normal':
     if policy_type == 'gnn':
       policy_module = GNN(
@@ -844,7 +782,6 @@ def make_policy_network(
           node_feature_dim = 2
       )
     elif policy_type == 'abd':
-      print("ABd param_size= ", param_size)
       policy_module = ABDNet(
           layer_sizes=list(hidden_layer_sizes) + [param_size],
           hidden_dim=64,
@@ -886,9 +823,7 @@ def make_policy_network(
       )
     else:
       obs = preprocess_observations_fn(obs, processor_params)
-    out = policy_module.apply(policy_params, obs)
-    print("polixy out shape=",out.shape)
-    return out
+    return policy_module.apply(policy_params, obs)
 
   obs_size = _get_obs_state_size(obs_size, obs_key)
   dummy_obs = jnp.zeros((1, obs_size))

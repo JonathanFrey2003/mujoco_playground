@@ -41,12 +41,10 @@ def compute_orthogonality_loss(
 ):
     orthogonality_loss = 0.0
 
-    policy_params = params.policy
+    policy_params = params.policy["params"]
 
     if "W" in policy_params:
-
         W = policy_params["W"]      # (17, hidden_dim, hidden_dim)
-
         I = jnp.eye(W.shape[-1])
 
         WT_W = jnp.matmul(
@@ -57,7 +55,6 @@ def compute_orthogonality_loss(
         orthogonality_loss = jnp.mean(
             (WT_W - I) ** 2
         )
-    print("orthogonality_loss * orthogonality_weight")
     return orthogonality_loss * orthogonality_weight
 
 
@@ -182,7 +179,7 @@ def compute_ppo_loss(
     vf_coefficient: float = 0.5,
     clipping_epsilon_value: float | None = None,
     use_distributional_critic: bool = False,
-    orthogonality_weight: float = 1e-4,
+    orthogonality_weight: float = 1e-2,
 ) -> Tuple[jnp.ndarray, types.Metrics]:
   """Computes PPO loss.
 

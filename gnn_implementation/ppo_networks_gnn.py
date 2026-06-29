@@ -97,6 +97,7 @@ def make_ppo_networks(
     use_distributional_critic: bool = False,
     num_quantiles: int = 32,
     edges: jax.numpy.ndarray = None,
+    policy_type='abd'
 ) -> PPONetworks:
   """Make PPO networks with preprocessor."""
   policy_kernel_init_kwargs = policy_network_kernel_init_kwargs or {}
@@ -136,7 +137,7 @@ def make_ppo_networks(
           mean_kernel_init_fn(**mean_kernel_init_kwargs_)
           if mean_kernel_init_fn is not None else None
       ),
-      policy_type='abd',
+      policy_type=policy_type,
       edges=edges,
   )
   value_network = networks.make_value_network(
