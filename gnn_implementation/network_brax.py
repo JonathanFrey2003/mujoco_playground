@@ -778,7 +778,7 @@ def make_policy_network(
     param_size: int,
     obs_size: types.ObservationSize,
     preprocess_observations_fn: types.PreprocessObservationFn = types.identity_observation_preprocessor,
-    hidden_layer_sizes: Sequence[int] = (256, 256),
+    hidden_layer_sizes: Sequence[int] = (64),
     activation: ActivationFn = linen.relu,
     kernel_init: Initializer = jax.nn.initializers.lecun_uniform(),
     layer_norm: bool = False,
