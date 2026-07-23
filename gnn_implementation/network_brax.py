@@ -94,10 +94,10 @@ class FeedForwardNetwork:
 
 class ABDNet(nn.Module):
     layer_sizes: Sequence[int]
-    hidden_dim: int
-
-    num_nodes: int
-    node_feature_dim: int
+    hidden_dim: int = 64
+    encoder_dim: Sequence[int] = (64)
+    decoder_dim: Sequence[int] = (64)
+    num_nodes: int = 17
 
     layer_norm: bool = False
     activation: callable = nn.relu
@@ -125,22 +125,21 @@ class ABDNet(nn.Module):
         return order
     
     def setup(self):
-
-        self.link_encoders = [MLP([64, self.hidden_dim], layer_norm=True)
+        self.link_encoders = [MLP(list(self.encoder_dim) + [self.hidden_dim], layer_norm=True, activation=self.activation, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)), output_kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)))
                                 for _ in range(self.num_nodes)]
 
-        self.action_decoders = [MLP([64,2], layer_norm=True)
+        self.action_decoders = [MLP(list(self.decoder_dim) + [2], layer_norm=False, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)), output_kernel_init=nn.initializers.orthogonal(0.01))
                                 for _ in range(self.num_nodes-1)]
 
         self.B = self.param(
             "B",
-            nn.initializers.zeros,
+            nn.initializers.xavier_uniform(),
             (self.num_nodes, self.hidden_dim),
         )
 
         self.W = self.param(
             "W",
-            nn.initializers.orthogonal(),
+            nn.initializers.orthogonal(scale=0.1),
             (
                 self.num_nodes,
                 self.hidden_dim,
@@ -259,58 +258,76 @@ class GNN(nn.Module):
     edges: jnp.ndarray = None
     num_nodes: int = None 
     node_feature_dim: int = None
+    
 
     def setup(self):
-      self.input_part = nn.Dense(self.hidden_dim)
-      self.message_network = nn.Dense(self.hidden_dim)
-      self.update_network = nn.Dense(self.hidden_dim)
-      self.output_module = [nn.Dense(size) for size in self.layer_sizes] 
-
+      self.input_model = MLP(layer_sizes=[self.hidden_dim, self.hidden_dim], 
+                            layer_norm=True,
+                            activation=self.activation,
+                            #activate_final=True,
+                            )
+      self.message_network = MLP(layer_sizes=[self.hidden_dim],
+                                #layer_norm=True, 
+                                activation=self.activation,
+                                #activate_final=True
+                                 )
+      self.update_network = MLP(layer_sizes=[self.hidden_dim], 
+                               #layer_norm=True,
+                               activation=self.activation,
+                               #activate_final=True
+                               )
+      self.output_model = MLP(layer_sizes= self.layer_sizes, 
+                              activation=self.activation, 
+                              layer_norm=self.layer_norm) 
+      
+      self.senders = jnp.concatenate([self.edges[:, 0], self.edges[:,1]], axis=0)
+      self.receivers = jnp.concatenate([self.edges[:, 1], self.edges[:,0]], axis=0)
+    
+    @linen.compact
     def __call__(self, data: jnp.ndarray) -> jnp.ndarray:     
       # Turn node features into graph structure
       batch_shape = data.shape[:-1]
-      node_features = jnp.reshape(data,batch_shape + (self.num_nodes, self.node_feature_dim))
-      # Initial node embedding
-      node_states = self.input_part(node_features)
+      #print("input data shape:", data.shape) # should be (batch_size, num_obs_sensor * node_feature_dim)??
+      node_features = jnp.reshape(data,batch_shape + (self.num_nodes-1, self.node_feature_dim)) 
 
-      # Message passing
-      senders = jnp.concatenate([self.edges[:, 0], self.edges[:,1]], axis=0)
-      sender_states = jnp.take(node_states, senders, axis = -2)
-      receivers = jnp.concatenate([self.edges[:, 1], self.edges[:,0]], axis=0)
-      receiver_states = jnp.take(node_states, receivers, axis = -2)
+      #Zero padding for root node
+      node_features = jnp.concatenate([jnp.zeros(batch_shape + (1, self.node_feature_dim)), node_features], axis=-2)
 
-      # Compute messages
-      combined_edge_inputs = jnp.concatenate([sender_states, receiver_states], axis=-1)
-      messages = self.message_network(combined_edge_inputs)
-      messages = self.activation(messages)
-      
-      # Aggregate messages (sum)
-      aggregated_messages = jnp.zeros_like(node_states)
-      def sum_messages(msg):
-          return jnp.zeros(node_states.shape[-2:]).at[receivers].add(msg)
+      # Initial node embedding (state vector)
+      print("node feature example", node_features[0])
+      node_states = self.input_model(node_features) # Eq.1, (batch_size, num_nodes, hidden_dim)
+      print("node state vector shape:", node_states.shape)
 
-      if len(batch_shape) > 0:
-          batch_sum = jax.vmap(sum_messages, in_axes=0, out_axes=0)
-          # Flatten batch dimensions 
-          flat_messages = jnp.reshape(messages, (-1, len(receivers), self.hidden_dim))
-          flat_aggregated = jax.vmap(lambda m: jnp.zeros((self.num_nodes, self.hidden_dim)).at[receivers].add(m))(flat_messages)
-          aggregated_messages = jnp.reshape(flat_aggregated, node_states.shape)
-      else:
-          aggregated_messages = sum_messages(messages) 
+      # Message passing (Propagation model)
+      for _ in range(self.message_passing_steps):
         
-      # Update node states
-      update_inputs = jnp.concatenate([node_states, aggregated_messages], axis=-1)
-      node_states = self.activation(self.update_network(update_inputs))
+        sender_states = jnp.take(node_states, self.senders, axis = -2)
+        receiver_states = jnp.take(node_states, self.receivers, axis = -2)
 
-      # Output module
+        # Message Computation
+        combined_edge_inputs = jnp.concatenate([sender_states, receiver_states], axis=-1) # (batch_size, num_edges, 2 * hidden_dim)
+        messages = self.message_network(combined_edge_inputs) # Eq.2 (batch_size, num_edges*2 , hidden_dim)
+        #print("messages shape:", messages.shape) 
+
+        # Message Aggregation (sum)
+        aggregated_messages = jnp.zeros_like(node_states)
+        def sum_messages(msg):
+            return jnp.zeros(node_states.shape).at[..., self.receivers, :].add(msg)
+        
+        aggregated_messages = sum_messages(messages) 
+        #print("aggregated messages shape:", aggregated_messages.shape)
+          
+        # Update node states
+        update_inputs = jnp.concatenate([node_states, aggregated_messages], axis=-1)
+        node_states = self.update_network(update_inputs) # Eq.3 (batch_size, num_nodes, hidden_dim)
+
+      # Output model
       x = jnp.reshape(node_states, batch_shape +  (-1,))
-      for i, layer in enumerate(self.output_module):
-          x = layer(x)
-          if i < len(self.output_module) - 1:
-              x = self.activation(x)
-              if self.layer_norm:
-                  x = nn.LayerNorm()(x)
+
+      x = self.output_model(x) # Eq.4 (batch_size, output_dim)
+      #print("output x shape:", x.shape)
       return x
+
 
 class MLPHead(linen.Module):
   """MLP over pre-processed latent vectors.
@@ -774,15 +791,18 @@ def make_policy_network(
     mean_kernel_init: Initializer | None = None,
     policy_type: str ='gnn',
     edges: jnp.ndarray = None,
-    num_nodes: int = 16
+    num_nodes: int = 17,
+    hidden_dim: int = 64,
+    encoder_dim: Sequence[int] = (64),
+    decoder_dim: Sequence[int] = (64),
 ) -> FeedForwardNetwork:
   """Creates a policy network."""
   if distribution_type == 'tanh_normal':
     if policy_type == 'gnn':
       policy_module = GNN(
           layer_sizes=list(hidden_layer_sizes) + [param_size],
-          hidden_dim= 64,
-          message_passing_steps=3,
+          hidden_dim= hidden_dim,
+          message_passing_steps=4,
           activation=activation,
           layer_norm=layer_norm,
           edges=edges,  
@@ -792,11 +812,12 @@ def make_policy_network(
     elif policy_type == 'abd':
       policy_module = ABDNet(
           layer_sizes=list(hidden_layer_sizes) + [param_size],
-          hidden_dim=64,
-          num_nodes=17,
-          node_feature_dim=2,
+          num_nodes=num_nodes,
           activation=activation,
           layer_norm=layer_norm,
+          hidden_dim = hidden_dim,
+          encoder_dim = encoder_dim,
+          decoder_dim = decoder_dim,
       )
     else:
       policy_module = MLP(
