@@ -93,10 +93,10 @@ class FeedForwardNetwork:
 
 class ABDNet(nn.Module):
     layer_sizes: Sequence[int]
-    hidden_dim: int
-
-    num_nodes: int
-    node_feature_dim: int
+    hidden_dim: int = 64
+    encoder_dim: Sequence[int] = (64)
+    decoder_dim: Sequence[int] = (64)
+    num_nodes: int = 17
 
     layer_norm: bool = False
     activation: callable = nn.relu
@@ -124,22 +124,21 @@ class ABDNet(nn.Module):
         return order
     
     def setup(self):
-
-        self.link_encoders = [MLP([128, self.hidden_dim], layer_norm=False )
+        self.link_encoders = [MLP(list(self.encoder_dim) + [self.hidden_dim], layer_norm=True, activation=self.activation, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)), output_kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)))
                                 for _ in range(self.num_nodes)]
 
-        self.action_decoders = [MLP([128, 64, 2], layer_norm=False)
+        self.action_decoders = [MLP(list(self.decoder_dim) + [2], layer_norm=False, kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)), output_kernel_init=nn.initializers.orthogonal(0.01))
                                 for _ in range(self.num_nodes-1)]
 
         self.B = self.param(
             "B",
-            nn.initializers.zeros,
+            nn.initializers.xavier_uniform(),
             (self.num_nodes, self.hidden_dim),
         )
 
         self.W = self.param(
             "W",
-            nn.initializers.orthogonal(),
+            nn.initializers.orthogonal(scale=0.1),
             (
                 self.num_nodes,
                 self.hidden_dim,
@@ -801,7 +800,9 @@ def make_policy_network(
     policy_type: str ='gnn',
     edges: jnp.ndarray = None,
     hidden_dim: int = 64,
-    num_nodes: int = 17
+    num_nodes: int = 17,
+    encoder_dim: Sequence[int] = (64),
+    decoder_dim: Sequence[int] = (64),
 ) -> FeedForwardNetwork:
   """Creates a policy network."""
   if distribution_type == 'tanh_normal':
@@ -822,11 +823,12 @@ def make_policy_network(
       print("Using ABDNet policy network")
       policy_module = ABDNet(
           layer_sizes=list(hidden_layer_sizes) + [param_size],
-          hidden_dim=hidden_dim,
-          num_nodes=17,
-          node_feature_dim=2,
+          num_nodes=num_nodes,
           activation=activation,
           layer_norm=layer_norm,
+          hidden_dim = hidden_dim,
+          encoder_dim = encoder_dim,
+          decoder_dim = decoder_dim,
       )
       print("hidden_dim:", hidden_dim)
     else:
