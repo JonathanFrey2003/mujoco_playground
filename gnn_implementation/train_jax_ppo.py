@@ -26,7 +26,8 @@ from absl import flags
 from absl import logging
 import ppo_networks_gnn as ppo_networks
 from brax.training.agents.ppo import networks_vision as ppo_networks_vision
-from brax.training.agents.ppo import train as ppo
+import train as ppo
+#from brax.training.agents.ppo import train as ppo
 from etils import epath
 import jax
 import jax.numpy as jp
@@ -180,6 +181,12 @@ _WARP_KERNEL_CACHE_DIR = flags.DEFINE_string(
 _LOGDIR = flags.DEFINE_string(
     "logdir", None, "Directory for logging."
 )
+_POLICY_TYPE = flags.DEFINE_enum(
+    "policy_type",
+    "gnn",
+    ["gnn", "mlp", "abd"],
+    "Policy network type",
+)
 
 
 def get_rl_config(env_name: str) -> config_dict.ConfigDict:
@@ -287,6 +294,15 @@ def main(argv):
   if _PLAYGROUND_CONFIG_OVERRIDES.value is not None:
     env_cfg_overrides.update(json.loads(_PLAYGROUND_CONFIG_OVERRIDES.value))
 
+  if _ENV_NAME.value == "LeapCubeReorient":
+    env_cfg.reward_config.scales.orientation = 10.0
+    env_cfg.reward_config.scales.position = 0.5
+    env_cfg.reward_config.scales.termination = -100.0
+    env_cfg.reward_config.scales.hand_pose = -0.5
+    env_cfg.reward_config.scales.action_rate = -0.01
+    env_cfg.reward_config.scales.joint_vel = -0.01
+    env_cfg.reward_config.scales.energy = -0.001
+
   env = registry.load(
       _ENV_NAME.value, config=env_cfg, config_overrides=env_cfg_overrides
   )
@@ -369,10 +385,10 @@ def main(argv):
   )
   if hasattr(ppo_params, "network_factory"):
     network_factory = functools.partial(
-        network_fn, **ppo_params.network_factory
+        network_fn, policy_type=_POLICY_TYPE.value, **ppo_params.network_factory
     )
   else:
-    network_factory = network_fn
+    network_factory = functools.partial(network_fn, policy_type=_POLICY_TYPE.value)
 
   if _DOMAIN_RANDOMIZATION.value:
     training_params["randomization_fn"] = registry.get_domain_randomizer(
@@ -394,6 +410,7 @@ def main(argv):
       wrap_env_fn=wrapper.wrap_for_brax_training,
       num_eval_envs=num_eval_envs,
       vision=_VISION.value,
+      policy_type=_POLICY_TYPE.value
   )
 
   times = [time.monotonic()]
@@ -489,6 +506,17 @@ def main(argv):
       config_overrides=infer_env_overrides,
   )
 
+
+  # Make the cube 2x heavier for the entire inference run.
+  # cube_body_id = infer_env.mj_model.body("cube").id
+  # old_mass = infer_env.mj_model.body_mass[cube_body_id]
+  # infer_env.mj_model.body_mass[cube_body_id] = 2.0 * old_mass
+
+  # new_mass = infer_env.mj_model.body_mass[cube_body_id]
+  # print(f"Cube mass before: {float(old_mass)}")
+  # print(f"Cube mass after:  {float(new_mass)}")
+  # print(f"Mass change successful: {bool(new_mass == 2.0 * old_mass)}")
+
   # Run evaluation rollouts matching how training handles batched environments.
   wrapped_infer_env = wrapper.wrap_for_brax_training(
       infer_env,
@@ -508,7 +536,7 @@ def main(argv):
   empty_traj = empty_traj.replace(data=empty_data)
 
   def step(carry, _):
-    state, rng = carry
+    state, rng, ep_return = carry
     rng, act_key = jax.random.split(rng)
     act_keys = jax.random.split(act_key, _NUM_VIDEOS.value)
     act = jax.vmap(jit_inference_fn)(state.obs, act_keys)[0]
@@ -522,19 +550,23 @@ def main(argv):
         "data.mocap_quat": state.data.mocap_quat,
         "data.xfrc_applied": state.data.xfrc_applied,
     })
-    return (state, rng), traj_data
+    ep_return = ep_return + getattr(state, "reward", 0.0)
+    return (state, rng, ep_return), traj_data
 
   @jax.jit
   def do_rollout(state, rng):
-    _, traj = jax.lax.scan(
-        step, (state, rng), None, length=ppo_params.episode_length
+    init_return = jp.zeros((_NUM_VIDEOS.value,))
+    (_, _, ep_return), traj = jax.lax.scan(
+        step, (state, rng, init_return), None, length=ppo_params.episode_length
     )
-    return traj
+    return traj, ep_return
 
-  traj_stacked = do_rollout(reset_states, jax.random.PRNGKey(_SEED.value + 1))
+  traj_stacked, ep_return = do_rollout(reset_states, jax.random.PRNGKey(_SEED.value + 1))
   # traj_stacked has shape (time, nworld, ...), swap to (nworld, time, ...).
   traj_stacked = jax.tree.map(lambda x: jp.moveaxis(x, 0, 1), traj_stacked)
   trajectories = [None] * _NUM_VIDEOS.value
+  print(f"Inference mean episode return: {float(ep_return.mean()):.3f}")
+  print(f"Inference return std: {float(ep_return.std()):.3f}")
   for i in range(_NUM_VIDEOS.value):
     t = jax.tree.map(lambda x, i=i: x[i], traj_stacked)
     trajectories[i] = [

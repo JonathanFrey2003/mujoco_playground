@@ -40,7 +40,7 @@ def compute_orthogonality_loss(
     orthogonality_weight: float,
     states: jnp.ndarray
 ):
-    orthogonality_loss = 0.0
+    orthogonality_loss = jnp.array(0.0)
 
     policy_params = params.policy["params"]
 
@@ -192,6 +192,7 @@ def compute_ppo_loss(
     clipping_epsilon_value: float | None = None,
     use_distributional_critic: bool = False,
     orthogonality_weight: float = 1e-3,
+    policy_type: str = 'abd',
 ) -> Tuple[jnp.ndarray, types.Metrics]:
   """Computes PPO loss.
 
@@ -223,9 +224,22 @@ def compute_ppo_loss(
 
   # Put the time dimension first.
   data = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), data)
-  policy_logits, states = policy_apply(
-      normalizer_params, params.policy, data.observation, return_intermediates=True
-  )
+  if policy_type == 'abd':
+    policy_logits, states = policy_apply(
+        normalizer_params,
+        params.policy,
+        data.observation,
+        return_intermediates=True,
+    )
+    orth_loss = compute_orthogonality_loss(params, orthogonality_weight, states)
+  else:
+    policy_logits = policy_apply(
+        normalizer_params,
+        params.policy,
+        data.observation,
+        return_intermediates=False,
+    )
+    orth_loss = jnp.array(0.0)
 
   if use_distributional_critic:
     baseline, baseline_quantiles = value_apply(
@@ -307,8 +321,6 @@ def compute_ppo_loss(
   # Entropy reward
   entropy = jnp.mean(parametric_action_distribution.entropy(policy_logits, rng))
   entropy_loss = entropy_cost * -entropy
-
-  orth_loss = compute_orthogonality_loss(params, orthogonality_weight, states)
 
   total_loss = policy_loss + v_loss + entropy_loss + orth_loss
 

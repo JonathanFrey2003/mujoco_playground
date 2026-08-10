@@ -32,7 +32,7 @@ from brax.training import types
 from brax.training.acme import running_statistics
 from brax.training.acme import specs
 from brax.training.agents.ppo import checkpoint
-from gnn_implementation import losses as ppo_losses
+import losses as ppo_losses
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import optimizer as ppo_optimizer
 from brax.training.types import Params
@@ -239,6 +239,7 @@ def train(
     restore_params: Optional[Any] = None,
     restore_value_fn: bool = True,
     run_evals: bool = True,
+    policy_type: str = 'abd'
 ):
   """PPO training.
 
@@ -478,6 +479,7 @@ def train(
       vf_coefficient=vf_loss_coefficient,
       clipping_epsilon_value=clipping_epsilon_value,
       use_distributional_critic=use_distributional_critic,
+      policy_type=policy_type,
   )
 
   loss_and_pgrad_fn = gradients.loss_and_pgrad(
