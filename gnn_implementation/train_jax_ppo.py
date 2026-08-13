@@ -385,7 +385,12 @@ def main(argv):
   )
   if hasattr(ppo_params, "network_factory"):
     network_factory = functools.partial(
-        network_fn, policy_type=_POLICY_TYPE.value, **ppo_params.network_factory
+        network_fn, 
+        policy_type=_POLICY_TYPE.value,
+        hidden_dim=128,
+        encoder_dim=(512, 256),
+        decoder_dim=(256,),
+        **ppo_params.network_factory
     )
   else:
     network_factory = functools.partial(network_fn, policy_type=_POLICY_TYPE.value)
@@ -442,7 +447,7 @@ def main(argv):
     eval_env_overrides["vision_config.nworld"] = num_eval_envs
   eval_env = registry.load(
       _ENV_NAME.value,
-      config=registry.get_default_config(_ENV_NAME.value),
+      config=env_cfg,
       config_overrides=eval_env_overrides,
   )
 
@@ -502,12 +507,12 @@ def main(argv):
     infer_env_overrides["vision_config.nworld"] = _NUM_VIDEOS.value
   infer_env = registry.load(
       _ENV_NAME.value,
-      config=registry.get_default_config(_ENV_NAME.value),
+      config=env_cfg,
       config_overrides=infer_env_overrides,
   )
 
 
-  # Make the cube 2x heavier for the entire inference run.
+  #Make the cube 2x heavier for the entire inference run.
   # cube_body_id = infer_env.mj_model.body("cube").id
   # old_mass = infer_env.mj_model.body_mass[cube_body_id]
   # infer_env.mj_model.body_mass[cube_body_id] = 2.0 * old_mass

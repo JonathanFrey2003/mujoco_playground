@@ -21,34 +21,31 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 echo "Starting inference..."
 #echo "Test if model can adapt to mass shifting during inference"
-echo "Inference for GNN, version 20260807-165231"
+echo "Inference for GNN, latest version"
 python train_jax_ppo.py \
     --env_name=LeapCubeReorient \
     --use_tb=True \
-    --load_checkpoint_path=/home/stud_nguyen1/gnn_implementation/logs/LeapCubeReorient-gnn/LeapCubeReorient-20260807-165231/checkpoints \
+    --load_checkpoint_path=/home/stud_nguyen1/gnn_implementation/logs/LeapCubeReorient-seed_2/LeapCubeReorient-20260812-032107 \
     --logdir=/home/stud_nguyen1/gnn_implementation/logs/rollout \
-    --num_videos=2 \
+    --num_videos=1 \
     --num_timesteps=0 \
-    --policy_type=gnn \
+    --policy_type=abd \
     --play_only=True \
     --use_wandb=False \
-    --use_tb=False &
+    --use_tb=False 
 
-# echo "Inference for MLP baseline, version 20260802-165851"
-# python train_jax_ppo.py \
-#     --env_name=LeapCubeReorient \
-#     --use_tb=True \
-#     --load_checkpoint_path=/home/stud_nguyen1/gnn_implementation/logs/LeapCubeReorient-gnn/LeapCubeReorient-20260801-214838/checkpoints \
-#     --logdir=/home/stud_nguyen1/gnn_implementation/logs/rollout \
-#     --num_videos=2 \
-#     --num_timesteps=0 \
-#     --policy_type=mlp \
-#     --play_only=True \
-#     --use_wandb=False \
-#     --use_tb=False &
-
-wait
-
+echo "Inference for ABD, "
+python train_jax_ppo.py \
+    --env_name=LeapCubeReorient \
+    --use_tb=True \
+    --load_checkpoint_path=/home/stud_nguyen1/gnn_implementation/logs/LeapCubeReorient/ABD_Checkpoints  \
+    --logdir=/home/stud_nguyen1/gnn_implementation/logs/rollout \
+    --num_videos=1 \
+    --num_timesteps=0 \
+    --policy_type=abd \
+    --play_only=True \
+    --use_wandb=False \
+    --use_tb=False 
 
 echo "Inference completed!"
 

@@ -16,12 +16,17 @@ class GNN(nn.Module):
     message_passing_steps: int
     layer_norm: bool = False
     activation: ActivationFn = nn.relu
-    edges: jnp.ndarray = jnp.array([[0,1],[1,2],[2,3],
-                              [3,4],[0,5],[5,6],
-                              [6,7],[7,8],[0,9],
-                              [9,10],[10,11],[11,12],
-                              [0,13],[13,14],[14,15],
-                              [15,16]])  # shape (n_edges, 2)
+    edges: jnp.ndarray = dataclasses.field(
+        default_factory=lambda: jnp.array(
+            [[0, 1], [1, 2], [2, 3],
+             [3, 4], [0, 5], [5, 6],
+             [6, 7], [7, 8], [0, 9],
+             [9, 10], [10, 11], [11, 12],
+             [0, 13], [13, 14], [14, 15],
+             [15, 16]],
+            dtype=jnp.int32,
+        )
+    )
     adjacency_matrix: jnp.ndarray = None  # shape (n_nodes, n_nodes)
     num_nodes: int = None 
     node_feature_dim: int = None
@@ -36,8 +41,8 @@ class GNN(nn.Module):
          
       self._adj_list = default_adjacency_matrix if self.adjacency_matrix is None else self.adjacency_matrix
 
-      self.input_model = MLP(layer_sizes=[self.hidden_dim, self.hidden_dim],
-                        activation=self.activation)
+      self.input_model = [MLP([128, self.hidden_dim], layer_norm=False, activation=self.activation)
+                          for _ in range(self.num_nodes)]
       
       self.message_network = MLP(layer_sizes=[128,self.hidden_dim],
                                 layer_norm=False, 
@@ -51,7 +56,7 @@ class GNN(nn.Module):
                                activate_final=True
                                )
 
-      self.action_decoders = [MLP([64, 2], layer_norm=False, activation=self.activation)
+      self.action_decoders = [MLP([128, 2], layer_norm=False, activation=self.activation)
                               for _ in range(self.num_nodes-1)]
       
     
@@ -60,27 +65,24 @@ class GNN(nn.Module):
       # Turn node features into graph structure
       batch_shape = data.shape[:-1]
       #print("input data shape:", data.shape) # should be (batch_size, num_obs_sensor * node_feature_dim)??
-      node_features = jnp.reshape(data,batch_shape + (self.num_nodes-1, self.node_feature_dim)) 
-
-      #Zero padding for root node
-      #node_features = jnp.concatenate([jnp.zeros(batch_shape + (1, self.node_feature_dim)), node_features], axis=-2)
-
-      # Initial node embedding (state vector)
-      #print("node feature example", node_features[0])
-      node_states = self.input_model(node_features) # Eq.1, (batch_size, num_nodes, hidden_dim)
-      #print("node state vector shape:", node_states.shape
+      node_states_list = []
+      for i in range(self.num_nodes):
+        node_states_list.append(self.input_model[i](data))
+      
+      node_states = jnp.stack(node_states_list, axis=-2) # 
 
       # Message passing (Propagation model)
       for _ in range(self.message_passing_steps):
         
         # Message Computation
-        messages = self.message_network(node_states) # Eq.2 (batch_size, num_edges*2 , hidden_dim)
+        messages = self.message_network(node_states) # Eq.2
 
         # Message Aggregation (sum)
         aggregated_messages = jnp.matmul(self._adj_list, messages) 
           
         # Update node states
-        node_states = self.update_network(aggregated_messages) # Eq.3 (batch_size, num_nodes, hidden_dim)
+        update_inputs = jnp.concatenate([node_states, aggregated_messages], axis=-1)
+        node_states = self.update_network(update_inputs) # Eq.3 (batch_size, num_nodes, hidden_dim)
 
       # Output model
       actions = []

@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=4            # Give that task 4 CPU cores
 #SBATCH --gres=gpu:1                 # Request 1 GPU
 #SBATCH --time=24:00:00              # Set a hard limit of 24 hours
-#SBATCH --array=1
+#SBATCH --array=1-2
 
 echo "This will run on the compute node!"
 
@@ -23,7 +23,7 @@ export MUJOCO_GL=egl
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 # per-seed logdir to avoid collisions
-BASE_LOGDIR="/home/stud_nguyen1/gnn_implementation/logs/LeapCubeReorient-abd"
+BASE_LOGDIR="/home/stud_nguyen1/gnn_implementation/logs/LeapCubeReorient"
 LOGDIR="${BASE_LOGDIR}-seed_${SEED}"
 mkdir -p "${LOGDIR}"
 

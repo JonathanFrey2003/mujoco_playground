@@ -94,8 +94,8 @@ class FeedForwardNetwork:
 class ABDNet(nn.Module):
     layer_sizes: Sequence[int]
     hidden_dim: int = 64
-    encoder_dim: Sequence[int] = (64)
-    decoder_dim: Sequence[int] = (64)
+    encoder_dim: Sequence[int] = (64,)
+    decoder_dim: Sequence[int] = (64,)
     num_nodes: int = 17
 
     layer_norm: bool = False
@@ -801,8 +801,8 @@ def make_policy_network(
     edges: jnp.ndarray = None,
     hidden_dim: int = 64,
     num_nodes: int = 17,
-    encoder_dim: Sequence[int] = (64),
-    decoder_dim: Sequence[int] = (64),
+    encoder_dim: Sequence[int] = (64,),
+    decoder_dim: Sequence[int] = (64,),
 ) -> FeedForwardNetwork:
   """Creates a policy network."""
   if distribution_type == 'tanh_normal':

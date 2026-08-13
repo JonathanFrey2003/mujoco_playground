@@ -3,7 +3,7 @@
 from typing import Any, Literal, Mapping, Sequence, Tuple
 
 from brax.training import distribution
-from gnn_implementation import network_brax as networks
+import network_brax as networks
 from brax.training import types
 from brax.training.types import PRNGKey
 import flax
@@ -97,9 +97,9 @@ def make_ppo_networks(
     use_distributional_critic: bool = False,
     num_quantiles: int = 32,
     edges: jax.numpy.ndarray = None,
-    hidden_dim: int = 64,
-    encoder_dim: Sequence[int] = (64),
-    decoder_dim: Sequence[int] = (64),
+    hidden_dim: int = 128,
+    encoder_dim: Sequence[int] = (512, 256),
+    decoder_dim: Sequence[int] = (256,),
     policy_type='abd'
 ) -> PPONetworks:
   """Make PPO networks with preprocessor."""
